@@ -275,4 +275,545 @@
         let animFrameId = null;
 
         // Initialize Application
-     
+        function initApp() {
+            renderNav();
+            loadTopic(0);
+            window.addEventListener('resize', handleResize);
+            setupInteractiveDragEvents();
+        }
+
+        function handleResize() {
+            resizeCanvas();
+            initDefaultPositions();
+        }
+
+        function resizeCanvas() {
+            const container = canvas.parentElement;
+            if (!container) return;
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = container.clientWidth * dpr;
+            canvas.height = container.clientHeight * dpr;
+            ctx.scale(dpr, dpr);
+            canvas.style.width = container.clientWidth + 'px';
+            canvas.style.height = container.clientHeight + 'px';
+        }
+
+        function initDefaultPositions() {
+            const w = canvas.width / (window.devicePixelRatio || 1);
+            const h = canvas.height / (window.devicePixelRatio || 1);
+            
+            // Topic 0: Compass initial pos
+            magnetState.compassX = w / 2 + 100;
+            magnetState.compassY = h / 2 - 70;
+
+            // Topic 1: Laser emitter pos
+            slabState.emitterX = w / 2 - 140;
+            slabState.emitterY = h / 2 - 60;
+
+            // Topic 3: Dropper pos
+            phState.dropperX = w / 2;
+            phState.dropperY = h / 2 - 90;
+        }
+
+        function renderNav() {
+            const navList = document.getElementById('navList');
+            navList.innerHTML = topics.map((t, idx) => `
+                <button onclick="loadTopic(${idx})" class="w-full text-left p-3 rounded-xl border transition flex items-center space-x-3 ${idx === currentTopicIdx ? 'bg-indigo-50 border-indigo-200 text-indigo-900 shadow-sm' : 'border-transparent hover:bg-slate-50 text-slate-700'}">
+                    <div class="w-8 h-8 rounded-lg flex items-center justify-center text-base bg-white shadow-xs border border-slate-100 flex-shrink-0">${t.icon}</div>
+                    <div class="overflow-hidden">
+                        <span class="text-[10px] font-bold uppercase tracking-wider block text-slate-400">${t.category}</span>
+                        <h3 class="text-xs font-semibold truncate">${t.title}</h3>
+                    </div>
+                </button>
+            `).join('');
+        }
+
+        function loadTopic(idx) {
+            currentTopicIdx = idx;
+            const t = topics[idx];
+            document.getElementById('mainTitle').innerText = t.title;
+            const badge = document.getElementById('mainBadge');
+            badge.innerText = t.badge;
+            badge.className = `text-xs font-semibold px-2.5 py-1 rounded-full ${t.badgeClass}`;
+            document.getElementById('instructionOverlay').innerText = t.instructions;
+
+            document.getElementById('notesContent').innerHTML = `
+                <h3 class="text-lg font-bold text-slate-900 mb-1">${t.notesTitle}</h3>
+                <p class="text-xs font-medium text-slate-400 uppercase tracking-wider mb-4">${t.notesSubtitle}</p>
+                ${t.notesHTML}
+            `;
+            document.getElementById('controlsBar').innerHTML = t.controlsHTML;
+
+            renderNav();
+            closeDrawerMobile();
+            setTimeout(() => {
+                resizeCanvas();
+                initDefaultPositions();
+            }, 30);
+            restartLoop();
+        }
+
+        function toggleDrawerMobile() {
+            document.getElementById('sidebar').classList.toggle('-translate-x-full');
+            document.getElementById('backdrop').classList.toggle('hidden');
+        }
+
+        function closeDrawerMobile() {
+            document.getElementById('sidebar').classList.add('-translate-x-full');
+            document.getElementById('backdrop').classList.add('hidden');
+        }
+
+        // Tab Switching
+        document.getElementById('simTab').addEventListener('click', () => {
+            currentTab = 'sim';
+            document.getElementById('simTab').className = "flex-1 sm:flex-initial px-4 py-1.5 text-xs font-semibold rounded-lg bg-white text-indigo-600 shadow-sm transition";
+            document.getElementById('notesTab').className = "flex-1 sm:flex-initial px-4 py-1.5 text-xs font-semibold rounded-lg text-slate-600 hover:text-slate-800 transition";
+            document.getElementById('simView').classList.remove('hidden');
+            document.getElementById('notesView').classList.add('hidden');
+            setTimeout(resizeCanvas, 30);
+            restartLoop();
+        });
+
+        document.getElementById('notesTab').addEventListener('click', () => {
+            currentTab = 'notes';
+            document.getElementById('notesTab').className = "flex-1 sm:flex-initial px-4 py-1.5 text-xs font-semibold rounded-lg bg-white text-indigo-600 shadow-sm transition";
+            document.getElementById('simTab').className = "flex-1 sm:flex-initial px-4 py-1.5 text-xs font-semibold rounded-lg text-slate-600 hover:text-slate-800 transition";
+            document.getElementById('notesView').classList.remove('hidden');
+            document.getElementById('simView').classList.add('hidden');
+            if (animFrameId) cancelAnimationFrame(animFrameId);
+        });
+
+        document.getElementById('menuToggle').addEventListener('click', toggleDrawerMobile);
+        document.getElementById('backdrop').addEventListener('click', closeDrawerMobile);
+        document.getElementById('closeSidebar').addEventListener('click', closeDrawerMobile);
+
+        // --- FULLY INTERACTIVE DRAG & TOUCH HANDLERS ---
+        function setupInteractiveDragEvents() {
+            const getPos = (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                return { x: clientX - rect.left, y: clientY - rect.top };
+            };
+
+            const startInteraction = (e) => {
+                const pos = getPos(e);
+                const w = canvas.width / (window.devicePixelRatio || 1);
+                const h = canvas.height / (window.devicePixelRatio || 1);
+                const cx = w / 2, cy = h / 2;
+
+                if (currentTopicIdx === 0) {
+                    // Check if touching compass
+                    let dist = Math.hypot(pos.x - magnetState.compassX, pos.y - magnetState.compassY);
+                    if (dist < 35) {
+                        magnetState.isDraggingCompass = true;
+                    }
+                } else if (currentTopicIdx === 1) {
+                    // Check if touching laser emitter
+                    let dist = Math.hypot(pos.x - slabState.emitterX, pos.y - slabState.emitterY);
+                    if (dist < 40) {
+                        slabState.isDraggingEmitter = true;
+                    }
+                } else if (currentTopicIdx === 2) {
+                    // Check if touching test tubes area
+                    if (Math.abs(pos.x - cx) < 90 && Math.abs(pos.y - cy + 20) < 60) {
+                        electrolysisState.isDraggingTube = true;
+                    }
+                } else if (currentTopicIdx === 3) {
+                    // Check if touching dropper
+                    let dist = Math.hypot(pos.x - phState.dropperX, pos.y - phState.dropperY);
+                    if (dist < 40) {
+                        phState.isDraggingDropper = true;
+                    }
+                } else if (currentTopicIdx === 4) {
+                    // Heart chamber touch inspection
+                    let dx = pos.x - cx, dy = pos.y - cy;
+                    if (dx < 0 && dy < 0) heartState.selectedChamber = 'Right Atrium (Deoxygenated)';
+                    else if (dx >= 0 && dy < 0) heartState.selectedChamber = 'Left Atrium (Oxygenated)';
+                    else if (dx < 0 && dy >= 0) heartState.selectedChamber = 'Right Ventricle -> Lungs';
+                    else heartState.selectedChamber = 'Left Ventricle -> Body Aorta';
+                    document.getElementById('instructionOverlay').innerText = `Selected: ${heartState.selectedChamber}`;
+                }
+            };
+
+            const moveInteraction = (e) => {
+                const pos = getPos(e);
+                const w = canvas.width / (window.devicePixelRatio || 1);
+                const h = canvas.height / (window.devicePixelRatio || 1);
+
+                if (currentTopicIdx === 0 && magnetState.isDraggingCompass) {
+                    magnetState.compassX = pos.x;
+                    magnetState.compassY = pos.y;
+                } else if (currentTopicIdx === 1 && slabState.isDraggingEmitter) {
+                    slabState.emitterX = Math.min(cx - 60, Math.max(40, pos.x));
+                    slabState.emitterY = Math.min(cy + 30, Math.max(40, pos.y));
+                    // Calculate angle based on emitter offset relative to entry point
+                    let entryX = w/2 - 130, entryY = h/2;
+                    let dx = entryX - slabState.emitterX;
+                    let dy = entryY - slabState.emitterY;
+                    let ang = Math.atan2(dy, dx) * (180 / Math.PI);
+                    if (ang < 20) ang = 20;
+                    if (ang > 70) ang = 70;
+                    slabState.angle = Math.round(ang);
+                    const angleSliderElem = document.querySelector('input[type="range"]');
+                    if (angleSliderElem) angleSliderElem.value = slabState.angle;
+                    const angleValElem = document.getElementById('angleVal');
+                    if (angleValElem) angleValElem.innerText = slabState.angle + '°';
+                } else if (currentTopicIdx === 2 && electrolysisState.isDraggingTube) {
+                    electrolysisState.tubeOffsetY = Math.max(-25, Math.min(25, pos.y - h/2));
+                } else if (currentTopicIdx === 3 && phState.isDraggingDropper) {
+                    phState.dropperX = pos.x;
+                    phState.dropperY = Math.max(40, Math.min(h - 100, pos.y));
+                    // Map x position to pH 0-14
+                    let bw = Math.min(380, w * 0.8);
+                    let bx = w/2 - bw/2;
+                    let relX = pos.x - bx;
+                    let calculatedPH = Math.round((relX / bw) * 14);
+                    if (calculatedPH < 0) calculatedPH = 0;
+                    if (calculatedPH > 14) calculatedPH = 14;
+                    phState.ph = calculatedPH;
+                    phState.substance = `pH ${calculatedPH} Solution`;
+                    const phSlider = document.querySelector('input[type="range"]');
+                    if (phSlider) phSlider.value = calculatedPH;
+                    const phNum = document.getElementById('phNum');
+                    if (phNum) phNum.innerText = calculatedPH;
+                }
+            };
+
+            const endInteraction = () => {
+                magnetState.isDraggingCompass = false;
+                slabState.isDraggingEmitter = false;
+                electrolysisState.isDraggingTube = false;
+                phState.isDraggingDropper = false;
+            };
+
+            canvas.addEventListener('mousedown', startInteraction);
+            canvas.addEventListener('mousemove', moveInteraction);
+            canvas.addEventListener('mouseup', endInteraction);
+            canvas.addEventListener('mouseleave', endInteraction);
+
+            canvas.addEventListener('touchstart', (e) => { e.preventDefault(); startInteraction(e); }, { passive: false });
+            canvas.addEventListener('touchmove', (e) => { e.preventDefault(); moveInteraction(e); }, { passive: false });
+            canvas.addEventListener('touchend', endInteraction);
+        }
+
+        function restartLoop() {
+            if (animFrameId) cancelAnimationFrame(animFrameId);
+            animLoop();
+        }
+
+        function animLoop() {
+            if (currentTab !== 'sim') return;
+            const w = canvas.width / (window.devicePixelRatio || 1);
+            const h = canvas.height / (window.devicePixelRatio || 1);
+            ctx.clearRect(0, 0, w, h);
+
+            if (currentTopicIdx === 0) renderBarMagnet(w, h);
+            else if (currentTopicIdx === 1) renderGlassSlab(w, h);
+            else if (currentTopicIdx === 2) renderElectrolysis(w, h);
+            else if (currentTopicIdx === 3) renderPH(w, h);
+            else if (currentTopicIdx === 4) renderHeartSim(w, h);
+
+            animFrameId = requestAnimationFrame(animLoop);
+        }
+
+        // --- SIMULATION RENDERERS ---
+
+        function renderBarMagnet(w, h) {
+            const cx = w / 2, cy = h / 2;
+            const mw = Math.min(180, w * 0.45) * (magnetState.strength * 0.25 + 0.75);
+            const mh = 48;
+
+            ctx.save();
+            ctx.translate(cx, cy);
+            // South Pole (Blue)
+            ctx.fillStyle = '#3b82f6';
+            ctx.fillRect(-mw/2, -mh/2, mw/2, mh);
+            // North Pole (Red)
+            ctx.fillStyle = '#ef4444';
+            ctx.fillRect(0, -mh/2, mw/2, mh);
+
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 15px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('N', mw/4, 0);
+            ctx.fillText('S', -mw/4, 0);
+            ctx.restore();
+
+            if (magnetState.mode === 'filings') {
+                ctx.strokeStyle = 'rgba(148, 163, 184, 0.45)';
+                ctx.lineWidth = 1.5;
+                for (let a = 0; a < Math.PI * 2; a += Math.PI / 8) {
+                    ctx.beginPath();
+                    ctx.moveTo(cx + mw/4, cy);
+                    ctx.bezierCurveTo(cx + mw/2 + 80, cy - 110 * Math.sin(a), cx - mw/2 - 80, cy - 110 * Math.sin(a), cx - mw/4, cy);
+                    ctx.stroke();
+                }
+                ctx.fillStyle = '#64748b';
+                for (let i = 0; i < 140; i++) {
+                    let rx = cx + (Math.random() - 0.5) * (w * 0.85);
+                    let ry = cy + (Math.random() - 0.5) * (h * 0.8);
+                    if (Math.abs(rx - cx) > mw/2 || Math.abs(ry - cy) > mh/2) {
+                        ctx.fillRect(rx, ry, 2, 2);
+                    }
+                }
+            } else {
+                let compX = magnetState.compassX;
+                let compY = magnetState.compassY;
+                let dx = compX - cx, dy = compY - cy;
+                let angle = Math.atan2(dy, dx) + Math.PI/2;
+
+                // Compass Body
+                ctx.beginPath();
+                ctx.arc(compX, compY, 24, 0, Math.PI * 2);
+                ctx.fillStyle = '#ffffff';
+                ctx.fill();
+                ctx.strokeStyle = '#475569';
+                ctx.lineWidth = 2.5;
+                ctx.stroke();
+
+                ctx.save();
+                ctx.translate(compX, compY);
+                ctx.rotate(angle);
+                ctx.fillStyle = '#ef4444';
+                ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(5, 0); ctx.lineTo(-5, 0); ctx.fill();
+                ctx.fillStyle = '#3b82f6';
+                ctx.beginPath(); ctx.moveTo(0, 18); ctx.lineTo(5, 0); ctx.lineTo(-5, 0); ctx.fill();
+                ctx.restore();
+
+                // Drag indicator dot
+                ctx.fillStyle = '#4f46e5';
+                ctx.beginPath(); ctx.arc(compX, compY - 28, 3, 0, Math.PI*2); ctx.fill();
+            }
+        }
+
+        function renderGlassSlab(w, h) {
+            const cx = w / 2, cy = h / 2;
+            const sw = Math.min(260, w * 0.7);
+            const sh = Math.min(130, h * 0.45);
+
+            // Glass Slab Body
+            ctx.fillStyle = 'rgba(56, 189, 248, 0.15)';
+            ctx.strokeStyle = '#0ea5e9';
+            ctx.lineWidth = 2;
+            ctx.fillRect(cx - sw/2, cy - sh/2, sw, sh);
+            ctx.strokeRect(cx - sw/2, cy - sh/2, sw, sh);
+
+            let iRad = slabState.angle * (Math.PI / 180);
+            let rRad = Math.asin(Math.sin(iRad) / slabState.n);
+            let entryX = cx - sw/2, entryY = cy;
+
+            // Draw Draggable Light Source Emitter
+            let emX = slabState.emitterX;
+            let emY = slabState.emitterY;
+            ctx.fillStyle = '#ef4444';
+            ctx.beginPath(); ctx.arc(emX, emY, 14, 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
+
+            ctx.fillStyle = '#1e293b'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText('💡 Drag Laser', emX, emY - 18);
+
+            // Incident Ray (Red) from Emitter to Entry Point
+            ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.moveTo(emX, emY); ctx.lineTo(entryX, entryY); ctx.stroke();
+
+            // Refracted Ray inside slab (Yellow)
+            let exitX = entryX + sw;
+            let exitY = entryY + sw * Math.tan(rRad);
+            ctx.strokeStyle = '#eab308';
+            ctx.beginPath(); ctx.moveTo(entryX, entryY); ctx.lineTo(exitX, exitY); ctx.stroke();
+
+            // Emergent Ray (Green)
+            let rayLen = 100;
+            let endX = exitX + rayLen * Math.cos(iRad);
+            let endY = exitY + rayLen * Math.sin(iRad);
+            ctx.strokeStyle = '#22c55e';
+            ctx.beginPath(); ctx.moveTo(exitX, exitY); ctx.lineTo(endX, endY); ctx.stroke();
+
+            // Normal Dashed Lines
+            ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(entryX, entryY - 60); ctx.lineTo(entryX, entryY + 60);
+            ctx.moveTo(exitX, exitY - 60); ctx.lineTo(exitX, exitY + 60);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        function renderElectrolysis(w, h) {
+            const cx = w / 2, cy = h / 2 + electrolysisState.tubeOffsetY;
+            // Beaker
+            ctx.strokeStyle = '#64748b'; ctx.lineWidth = 3;
+            ctx.strokeRect(cx - 110, cy - 65, 220, 140);
+
+            // Water electrolyte level
+            ctx.fillStyle = 'rgba(16, 185, 129, 0.15)';
+            ctx.fillRect(cx - 108, cy - 20, 216, 93);
+
+            // Test tubes (Draggable vertically)
+            ctx.strokeRect(cx - 70, cy - 95, 38, 110);
+            ctx.strokeRect(cx + 32, cy - 95, 38, 110);
+
+            ctx.fillStyle = '#475569'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText('↕ Drag Tubes', cx, cy - 105);
+
+            if (electrolysisState.power) {
+                if (electrolysisState.h2 < 100) electrolysisState.h2 += 0.4;
+                if (electrolysisState.o2 < 50) electrolysisState.o2 += 0.2;
+
+                document.getElementById('h2Level').innerText = Math.min(100, Math.round(electrolysisState.h2)) + '%';
+                document.getElementById('o2Level').innerText = Math.min(100, Math.round(electrolysisState.o2 * 2)) + '%';
+
+                let h2H = (electrolysisState.h2 / 100) * 75;
+                ctx.fillStyle = 'rgba(16, 185, 129, 0.55)';
+                ctx.fillRect(cx - 68, (cy - 93) + (75 - h2H), 34, h2H);
+
+                let o2H = (electrolysisState.o2 / 50) * 75;
+                ctx.fillStyle = 'rgba(239, 68, 68, 0.55)';
+                ctx.fillRect(cx + 34, (cy - 93) + (75 - o2H), 34, o2H);
+            }
+
+            // Electrodes
+            ctx.fillStyle = '#475569';
+            ctx.fillRect(cx - 55, cy + 10, 10, 35);
+            ctx.fillRect(cx + 45, cy + 10, 10, 35);
+        }
+
+        function renderPH(w, h) {
+            const cx = w / 2, cy = h / 2;
+            const bw = Math.min(380, w * 0.8), bh = 40;
+            const bx = cx - bw / 2, by = cy - 60;
+
+            // pH Gradient Bar
+            const grad = ctx.createLinearGradient(bx, 0, bx + bw, 0);
+            grad.addColorStop(0, '#dc2626');
+            grad.addColorStop(0.2, '#ea580c');
+            grad.addColorStop(0.4, '#ca8a04');
+            grad.addColorStop(0.5, '#16a34a');
+            grad.addColorStop(0.7, '#0284c7');
+            grad.addColorStop(1, '#9333ea');
+
+            ctx.fillStyle = grad;
+            ctx.fillRect(bx, by, bw, bh);
+            ctx.strokeStyle = '#334155'; ctx.lineWidth = 2;
+            ctx.strokeRect(bx, by, bw, bh);
+
+            let px = bx + (phState.ph / 14) * bw;
+            ctx.fillStyle = '#0f172a';
+            ctx.beginPath(); ctx.moveTo(px, by - 10); ctx.lineTo(px - 7, by); ctx.lineTo(px + 7, by); ctx.fill();
+
+            // Indicator Beaker
+            ctx.fillStyle = getPHColor(phState.ph);
+            ctx.fillRect(cx - 55, cy + 18, 110, 85);
+            ctx.strokeStyle = '#475569'; ctx.lineWidth = 2.5;
+            ctx.strokeRect(cx - 55, cy + 18, 110, 85);
+
+            ctx.fillStyle = '#1e293b';
+            ctx.font = 'bold 13px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(phState.substance, cx, cy + 125);
+
+            // Draggable Dropper / Strip
+            let dx = phState.dropperX;
+            let dy = phState.dropperY;
+            ctx.fillStyle = '#3b82f6';
+            ctx.beginPath(); ctx.arc(dx, dy, 12, 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
+            ctx.fillStyle = '#1e293b'; ctx.font = '10px sans-serif';
+            ctx.fillText('🧪 Drag Dropper', dx, dy - 16);
+        }
+
+        function getPHColor(ph) {
+            if (ph <= 2) return 'rgba(220, 38, 38, 0.75)';
+            if (ph <= 5) return 'rgba(202, 138, 4, 0.75)';
+            if (ph === 7) return 'rgba(22, 163, 74, 0.75)';
+            if (ph <= 10) return 'rgba(2, 132, 199, 0.75)';
+            return 'rgba(147, 51, 234, 0.75)';
+        }
+
+        function renderHeartSim(w, h) {
+            const cx = w / 2, cy = h / 2;
+            if (heartState.running) heartState.phase += 0.06;
+            let pulse = 1 + 0.035 * Math.sin(heartState.phase * 4);
+
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.scale(pulse, pulse);
+
+            // Heart Chambers
+            ctx.fillStyle = '#38bdf8'; ctx.beginPath(); ctx.arc(-38, -20, 34, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#f87171'; ctx.beginPath(); ctx.arc(38, -20, 34, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#0284c7'; ctx.beginPath(); ctx.arc(-38, 28, 38, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#dc2626'; ctx.beginPath(); ctx.arc(38, 28, 38, 0, Math.PI*2); ctx.fill();
+
+            ctx.fillStyle = 'white'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText('Right Atrium', -38, -20);
+            ctx.fillText('Left Atrium', 38, -20);
+            ctx.fillText('Right Vent.', -38, 28);
+            ctx.fillText('Left Vent.', 38, 28);
+            ctx.restore();
+        }
+
+        // Control Handlers
+        function setMagnetMode(m) {
+            magnetState.mode = m;
+            document.getElementById('btnFilings').className = m === 'filings' ? 'px-3 py-2 text-xs font-semibold rounded-xl bg-indigo-600 text-white shadow-sm transition' : 'px-3 py-2 text-xs font-semibold rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 transition';
+            document.getElementById('btnCompass').className = m === 'compass' ? 'px-3 py-2 text-xs font-semibold rounded-xl bg-indigo-600 text-white shadow-sm transition' : 'px-3 py-2 text-xs font-semibold rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 transition';
+        }
+
+        function changeMagnetStrength(v) {
+            magnetState.strength = parseInt(v);
+            document.getElementById('strengthLabel').innerText = ["Weak", "Normal", "Strong"][v-1];
+        }
+
+        function updateSlabAngle(v) {
+            slabState.angle = parseInt(v);
+            document.getElementById('angleVal').innerText = v + '°';
+        }
+
+        function togglePower() {
+            electrolysisState.power = !electrolysisState.power;
+            const btn = document.getElementById('powerBtn');
+            btn.innerText = electrolysisState.power ? "Turn OFF Power" : "Turn ON Power";
+            btn.className = electrolysisState.power ? "px-4 py-2 text-xs font-semibold rounded-xl bg-rose-600 text-white shadow-sm transition" : "px-4 py-2 text-xs font-semibold rounded-xl bg-indigo-600 text-white shadow-sm transition";
+        }
+
+        function resetElectrolysis() {
+            electrolysisState.h2 = 0;
+            electrolysisState.o2 = 0;
+            electrolysisState.tubeOffsetY = 0;
+        }
+
+        function changePH(v) {
+            phState.ph = parseInt(v);
+            document.getElementById('phNum').innerText = v;
+            phState.substance = `pH ${v} Solution`;
+        }
+
+        function setSubstance(name, ph) {
+            phState.ph = ph;
+            phState.substance = name;
+            document.getElementById('phNum').innerText = ph;
+        }
+
+        function toggleHeart() {
+            heartState.running = !heartState.running;
+            const btn = document.getElementById('heartBtn');
+            const status = document.getElementById('heartStatus');
+            btn.innerText = heartState.running ? "Pause Pump" : "Start Heart Pump";
+            status.innerText = heartState.running ? "Pumping Blood" : "Paused";
+            status.className = heartState.running ? "text-emerald-600" : "text-rose-600";
+        }
+
+        function resetHeart() {
+            heartState.running = false;
+            heartState.phase = 0;
+            document.getElementById('heartBtn').innerText = "Start Heart Pump";
+            document.getElementById('heartStatus').innerText = "Paused";
+            document.getElementById('heartStatus').className = "text-rose-600";
+        }
+
+        window.onload = initApp;
+    </script>
+</body>
+</html>
